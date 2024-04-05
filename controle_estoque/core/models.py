@@ -2,6 +2,8 @@ import re
 import uuid
 
 from django.db import models
+from django.db.models import F, Q, Sum, Value
+from django.db.models.functions import Coalesce
 
 
 class ModeloBase(models.Model):
@@ -30,13 +32,17 @@ class Empresa(ModeloBase):
     nome = models.CharField(max_length=255)
     cnpj = models.CharField(max_length=14)
 
-    def __str__(self):
+    @property
+    def cnpj_formatado(self):
         cnpj_formatado = re.sub(
             r'(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})', 
             r'\1.\2.\3/\4-\5', 
             self.cnpj
         )
-        return f'{self.nome} - {cnpj_formatado}'
+        return cnpj_formatado
+
+    def __str__(self):
+        return f'{self.nome} - {self.cnpj_formatado}'
 
 
 class Perfil(ModeloBase):
@@ -139,19 +145,58 @@ class Estoque(ModeloBase):
 
     def __str__(self):
         return f'{self.uuid} - {self.armazem.nome} - {self.produto.nome}'
+    
+    def save(self, *args, **kwargs):
+        novo_objeto = self.criado_em is None
+        super().save(*args, **kwargs)
+        if novo_objeto:
+            self.gera_movimento_inicial()
+
+    def gera_movimento_inicial(self):
+        movimento = Movimento(
+            estoque=self,
+            tipo=Movimento.ENTRADA,
+            quantidade=self.quantidade
+        )
+        movimento.save()
 
 
 class Movimento(ModeloBase):
+    ENTRADA = 'E'
+    SAIDA = 'S'
     TIPOS = (
-        ('E', 'Entrada'),
-        ('S', 'Saída')
+        (ENTRADA, 'Entrada'),
+        (SAIDA, 'Saída')
     )
 
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    responsavel = models.ForeignKey('core.Perfil', on_delete=models.PROTECT)
-    estoque = models.ForeignKey('core.Estoque', on_delete=models.PROTECT)
+    responsavel = models.ForeignKey('core.Perfil', on_delete=models.PROTECT, null=True)
+    estoque = models.ForeignKey('core.Estoque', on_delete=models.PROTECT, related_name='movimentos')
     tipo = models.CharField(max_length=1, choices=TIPOS)
     quantidade = models.DecimalField(max_digits=14, decimal_places=3)
 
     def __str__(self):
         return f'{self.uuid} - {self.estoque.produto.nome} - {self.get_tipo_display()}: {self.quantidade}'
+    
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.atualiza_estoque()
+
+    def delete(self, *args, **kwargs):
+        super().delete(*args, **kwargs)
+        self.atualiza_estoque()
+
+    def atualiza_estoque(self):
+        quantidade_total = Movimento.objects.filter(
+            estoque=self.estoque
+        ).aggregate(
+            total_entrada=Coalesce(
+                Sum('quantidade', filter=Q(tipo=Movimento.ENTRADA)), Value(0), output_field=models.DecimalField()
+            ),
+            total_saida=Coalesce(
+                Sum('quantidade', filter=Q(tipo=Movimento.SAIDA)), Value(0), output_field=models.DecimalField()
+            ),
+            quantidade_total=F('total_entrada') - F('total_saida')
+        )['quantidade_total']
+        self.estoque.quantidade = quantidade_total
+        self.estoque.save()
