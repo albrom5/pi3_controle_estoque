@@ -60,8 +60,10 @@ class ArmazemAdmin(admin.ModelAdmin):
 
 
 class MovimentoInLine(admin.TabularInline):
+    readonly_fields = ['criado_em']
     model = models.Movimento
     extra = 0
+    ordering = ['-criado_em']
 
 @admin.register(models.Estoque)
 class EstoqueAdmin(admin.ModelAdmin):

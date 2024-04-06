@@ -2,6 +2,7 @@ import re
 import uuid
 
 from ninja import ModelSchema, Schema
+from ninja.errors import ValidationError
 from pydantic import field_validator
 
 from controle_estoque.core import models
@@ -84,7 +85,7 @@ class UnidadeMedidaSchema(ModelSchema):
 
 
 class ProdutoSchema(ModelSchema):
-    unidade_medida: UnidadeMedidaSchema
+    unidade_medida_sigla: str
 
     class Meta:
         model = models.Produto
@@ -108,8 +109,10 @@ class ProdutoEditaSchema(Schema):
 
 
 class EstoqueSchema(ModelSchema):
-    armazem: ArmazemSchema
-    produto: ProdutoSchema
+    armazem_uuid: uuid.UUID
+    armazem_nome: str
+    produto_uuid: uuid.UUID
+    produto_nome: str
 
     class Meta:
         model = models.Estoque
@@ -130,3 +133,33 @@ class EstoqueEditaSchema(ModelSchema):
     class Meta:
         model = models.Estoque
         fields = ['preco']
+
+
+class ListaSchema(Schema):
+    quantidade: int
+    lista: list
+
+
+class PerfilSchema(Schema):
+    usuario: str
+    nome: str
+    empresa_uuid: uuid.UUID
+    empresa_nome: str
+    empresa_cnpj: str
+    tipo: str
+
+
+class MovimentoNovoSchema(ModelSchema):
+    estoque_id: uuid.UUID
+    tipo: str 
+
+    @field_validator('tipo', mode='before')
+    @classmethod
+    def valida_tipo(cls, v: str) -> str:
+        if v not in [models.Movimento.ENTRADA, models.Movimento.SAIDA]:
+            raise ValidationError('Tipo não permitido, escolha E (Entrada) ou S (Saída)')
+        return v
+
+    class Meta:
+        model = models.Movimento
+        fields = ['quantidade']

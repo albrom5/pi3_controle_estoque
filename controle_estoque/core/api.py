@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from django.shortcuts import get_object_or_404
 from ninja_extra import NinjaExtraAPI
 from ninja_jwt.authentication import JWTAuth
@@ -8,6 +10,23 @@ from controle_estoque.core.utils import valida_permissao_empresa
 
 api = NinjaExtraAPI()
 api.register_controllers(NinjaJWTDefaultController)
+
+
+@api.get('/unidades_de_medida', auth=JWTAuth(), response=schemas.ListaSchema)
+def unidade_medida_lista(request):
+    unidades = models.UnidadeMedida.objects.order_by('nome')
+    
+    lista_unidades = [schemas.UnidadeMedidaSchema(**u) for u in unidades.values()] 
+    response = schemas.ListaSchema(quantidade=unidades.count(), lista=lista_unidades)
+    return response
+
+
+@api.get('/municipios', auth=JWTAuth(), response=schemas.ListaSchema)
+def municipios_lista(request):
+    municipios = models.Municipio.objects.order_by('uf', 'nome')
+    lista_municipios = [schemas.MunicipioSchema(**m) for m in municipios.values()] 
+    response = schemas.ListaSchema(quantidade=municipios.count(), lista=lista_municipios)
+    return response
 
 
 @api.post('/armazem/novo', auth=JWTAuth(), response=schemas.ArmazemSchema)
@@ -46,7 +65,7 @@ def armazem_exclui(request, armazem_id: str):
     return {'successo': f'O armazém {armazem.nome} - {uuid_str} foi excluído.'}
 
 
-@api.get('/armazens', auth=JWTAuth(), response=list[schemas.ArmazemSchema])
+@api.get('/armazens', auth=JWTAuth(), response=schemas.ListaSchema)
 def armazem_lista(request, empresa_id: str | None = None):
     armazens = models.Armazem.objects.select_related(
         'empresa', 'municipio'
@@ -55,13 +74,33 @@ def armazem_lista(request, empresa_id: str | None = None):
         empresa = models.Empresa.objects.filter(uuid=empresa_id).first()
         valida_permissao_empresa(request.user, empresa)
         armazens = armazens.filter(empresa=empresa)
-        return armazens
 
-    if request.user.is_superuser:
-        return armazens
+    elif not request.user.is_superuser:
+        armazens = armazens.filter(empresa__perfil__usuario=request.user).distinct()
     
-    armazens = armazens.filter(empresa__perfil__usuario=request.user).distinct()
-    return armazens
+    lista_armazens = [
+        schemas.ArmazemSchema(
+            uuid=a.uuid,
+            empresa=schemas.EmpresaSchema(
+                uuid=a.empresa.uuid, 
+                nome=a.empresa.nome, 
+                cnpj=a.empresa.cnpj
+            ),            
+            nome=a.nome,
+            logradouro=a.logradouro,
+            numero=a.numero,
+            complemento=a.complemento,
+            cep=a.cep,
+            municipio=schemas.MunicipioSchema(
+                id=a.municipio.id,
+                nome=a.municipio.nome,
+                uf=a.municipio.uf
+            ) if a.municipio is not None else None
+        ) 
+        for a in armazens
+    ]
+    response = schemas.ListaSchema(quantidade=armazens.count(), lista=lista_armazens)
+    return response
 
 
 @api.post('/produto/novo', auth=JWTAuth(), response=schemas.ProdutoSchema)
@@ -94,14 +133,23 @@ def produto_exclui(request, produto_id: str):
     return {'successo': f'O produto {produto.nome} - {uuid_str} foi excluído.'}
 
 
-@api.get('/produtos', auth=JWTAuth(), response=list[schemas.ProdutoSchema])
+@api.get('/produtos', auth=JWTAuth(), response=schemas.ListaSchema)
 def produto_lista(request):
     produtos = models.Produto.objects.select_related(
         'unidade_medida'
     ).order_by('nome')
     
-    return produtos
-
+    lista_produtos = [
+        schemas.ProdutoSchema(
+            uuid=p.uuid,
+            nome=p.nome,
+            unidade_medida_sigla=p.unidade_medida.sigla
+        ) 
+        for p in produtos
+    ] 
+    response = schemas.ListaSchema(quantidade=produtos.count(), lista=lista_produtos)
+    return response
+    
 
 @api.post('/estoque/novo', auth=JWTAuth(), response=schemas.EstoqueSchema)
 def estoque_novo(request, payload: schemas.EstoqueNovoSchema):
@@ -110,14 +158,32 @@ def estoque_novo(request, payload: schemas.EstoqueNovoSchema):
 
     estoque = models.Estoque(**payload.dict())
     estoque.save()
-    return estoque
+    response = schemas.EstoqueSchema(
+        uuid=estoque.uuid,
+        armazem_uuid=estoque.armazem.uuid,
+        armazem_nome=estoque.armazem.nome,
+        produto_uuid=estoque.produto.uuid,
+        produto_nome=estoque.produto.nome,
+        quantidade=estoque.quantidade,
+        preco=estoque.preco
+    )
+    return response
 
 
 @api.get('/estoque/{estoque_id}', auth=JWTAuth(), response=schemas.EstoqueSchema)
 def estoque(request, estoque_id: str):
     estoque = get_object_or_404(models.Estoque, uuid=estoque_id)
     valida_permissao_empresa(request.user, estoque.armazem.empresa)
-    return estoque
+    response = schemas.EstoqueSchema(
+        uuid=estoque.uuid,
+        armazem_uuid=estoque.armazem.uuid,
+        armazem_nome=estoque.armazem.nome,
+        produto_uuid=estoque.produto.uuid,
+        produto_nome=estoque.produto.nome,
+        quantidade=estoque.quantidade,
+        preco=estoque.preco
+    )
+    return response
 
 
 @api.patch('/estoque/{estoque_id}', auth=JWTAuth(), response=schemas.EstoqueSchema)
@@ -127,7 +193,16 @@ def estoque_edita(request, estoque_id: str, payload: schemas.EstoqueEditaSchema)
     for attr, value in payload.dict(exclude_unset=True).items():
         setattr(estoque, attr, value)
     estoque.save()
-    return estoque
+    response = schemas.EstoqueSchema(
+        uuid=estoque.uuid,
+        armazem_uuid=estoque.armazem.uuid,
+        armazem_nome=estoque.armazem.nome,
+        produto_uuid=estoque.produto.uuid,
+        produto_nome=estoque.produto.nome,
+        quantidade=estoque.quantidade,
+        preco=estoque.preco
+    )
+    return response
 
 
 @api.delete('/estoque/{estoque_id}', auth=JWTAuth())
@@ -139,7 +214,7 @@ def estoque_exclui(request, estoque_id: str):
     return {'successo': f'O item de estoque {estoque.produto.nome} - {uuid_str} foi excluído.'}
 
 
-@api.get('/itens_estoque', auth=JWTAuth(), response=list[schemas.EstoqueSchema])
+@api.get('/itens_estoque', auth=JWTAuth(), response=schemas.ListaSchema)
 def estoque_lista(request, empresa_id: str | None = None):
     estoques = models.Estoque.objects.select_related(
         'armazem', 'armazem__empresa', 'produto'
@@ -148,10 +223,87 @@ def estoque_lista(request, empresa_id: str | None = None):
         empresa = models.Empresa.objects.filter(uuid=empresa_id).first()
         valida_permissao_empresa(request.user, empresa)
         estoques = estoques.filter(armazem__empresa=empresa)
-        return estoques
 
-    if request.user.is_superuser:
-        return estoques
+    elif not request.user.is_superuser:
+        estoques = estoques.filter(
+            armazem__empresa__perfil__usuario=request.user
+        ).distinct()
     
-    estoques = estoques.filter(armazem__empresa__perfil__usuario=request.user).distinct()
-    return estoques
+    lista_estoques = [
+        schemas.EstoqueSchema(
+            uuid=e.uuid,
+            armazem_uuid=e.armazem.uuid,
+            armazem_nome=e.armazem.nome,
+            produto_uuid=e.produto.uuid,
+            produto_nome=e.produto.nome,
+            quantidade=e.quantidade,
+            preco=e.preco
+        ) 
+        for e in estoques
+    ] 
+    
+    response = schemas.ListaSchema(quantidade=estoques.count(), lista=lista_estoques)
+    return response
+
+
+@api.get('/empresas', auth=JWTAuth(), response=schemas.ListaSchema)
+def empresa_lista(request):
+    empresas = models.Empresa.objects.order_by('nome')
+    
+    if not request.user.is_superuser:
+        empresas = empresas.filter(perfil__usuario=request.user).distinct()
+    
+    lista_empresas = [schemas.EmpresaSchema(**e) for e in empresas.values()]
+    response = schemas.ListaSchema(quantidade=empresas.count(), lista=lista_empresas)
+    return response
+
+
+@api.get('/perfis', auth=JWTAuth(), response=schemas.ListaSchema)
+def perfil_lista(request, empresa_id: str | None = None):
+    perfis = models.Perfil.objects.select_related(
+        'tipo'
+    ).order_by('empresa__nome', 'usuario__username')
+    if empresa_id is not None:
+        empresa = models.Empresa.objects.filter(uuid=empresa_id).first()
+        valida_permissao_empresa(request.user, empresa)
+        perfis = perfis.filter(empresa=empresa)
+
+    elif not request.user.is_superuser:
+        perfis = perfis.filter(empresa__perfil__usuario=request.user).distinct()
+    
+    lista_perfis = [
+        schemas.PerfilSchema(
+            usuario=p.usuario.username,
+            nome=p.usuario.first_name,
+            empresa_uuid=p.empresa.uuid,
+            empresa_nome=p.empresa.nome,            
+            empresa_cnpj=p.empresa.cnpj,                        
+            tipo=p.tipo.nome
+        ) 
+        for p in perfis
+    ]
+    response = schemas.ListaSchema(quantidade=perfis.count(), lista=lista_perfis)
+    return response
+
+
+@api.post('/movimento/novo', auth=JWTAuth(), response=schemas.EstoqueSchema)
+def movimento_novo(request, payload: schemas.MovimentoNovoSchema):
+    estoque = models.Estoque.objects.filter(uuid=payload.estoque_id).first()
+    valida_permissao_empresa(request.user, estoque.armazem.empresa)
+
+    movimento = models.Movimento(**payload.dict())
+    movimento.responsavel = request.user.perfil_set.filter(
+        empresa=estoque.armazem.empresa
+    ).first()
+    movimento.criado_em = datetime.now()
+    movimento.save()
+    response = schemas.EstoqueSchema(
+        uuid=estoque.uuid,
+        armazem_uuid=movimento.estoque.armazem.uuid,
+        armazem_nome=movimento.estoque.armazem.nome,
+        produto_uuid=movimento.estoque.produto.uuid,
+        produto_nome=movimento.estoque.produto.nome,
+        quantidade=movimento.estoque.quantidade,
+        preco=movimento.estoque.preco
+    )
+    return response
