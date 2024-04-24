@@ -117,7 +117,7 @@ class Armazem(ModeloBase):
 
 class UnidadeMedida(ModeloBase):
     nome = models.CharField(max_length=50)
-    sigla = models.CharField(max_length=3)
+    sigla = models.CharField(max_length=3, unique=True)
 
     def __str__(self):
         return f'{self.nome} ({self.sigla})'
@@ -127,13 +127,29 @@ class UnidadeMedida(ModeloBase):
         verbose_name_plural = 'Unidades de Medida'
 
 
+class Marca(ModeloBase):
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nome = models.CharField(max_length=255, unique=True)
+
+    def __str__(self):
+        return self.nome
+
+
 class Produto(ModeloBase):
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nome = models.CharField(max_length=255)
     unidade_medida = models.ForeignKey('core.UnidadeMedida', on_delete=models.PROTECT)
+    marca = models.ForeignKey('core.Marca', on_delete=models.PROTECT, null=True, blank=True)
 
     def __str__(self):
         return self.nome
+    
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['nome', 'unidade_medida', 'marca'], 
+                name='produto_unico')
+        ]
 
 
 class Estoque(ModeloBase):
@@ -141,7 +157,7 @@ class Estoque(ModeloBase):
     armazem = models.ForeignKey('core.Armazem', on_delete=models.PROTECT)
     produto = models.ForeignKey('core.Produto', on_delete=models.PROTECT)
     quantidade = models.DecimalField(max_digits=14, decimal_places=3)
-    preco = models.DecimalField(max_digits=14, decimal_places=2)
+    preco = models.DecimalField('Preço', max_digits=14, decimal_places=2)
 
     def __str__(self):
         return f'{self.uuid} - {self.armazem.nome} - {self.produto.nome}'
@@ -156,7 +172,8 @@ class Estoque(ModeloBase):
         movimento = Movimento(
             estoque=self,
             tipo=Movimento.ENTRADA,
-            quantidade=self.quantidade
+            quantidade=self.quantidade,
+            preco=self.preco
         )
         movimento.save()
 
@@ -174,6 +191,9 @@ class Movimento(ModeloBase):
     estoque = models.ForeignKey('core.Estoque', on_delete=models.PROTECT, related_name='movimentos')
     tipo = models.CharField(max_length=1, choices=TIPOS)
     quantidade = models.DecimalField(max_digits=14, decimal_places=3)
+    preco = models.DecimalField(
+        'Preço', max_digits=14, decimal_places=2, blank=True, null=True
+    )
 
     def __str__(self):
         return f'{self.uuid} - {self.estoque.produto.nome} - {self.get_tipo_display()}: {self.quantidade}'
@@ -181,6 +201,9 @@ class Movimento(ModeloBase):
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         self.atualiza_estoque()
+        if self.preco is not None:
+            self.estoque.preco = self.preco
+            self.estoque.save()
 
     def delete(self, *args, **kwargs):
         super().delete(*args, **kwargs)

@@ -1,9 +1,10 @@
 import re
 import uuid
+from typing import Any
 
 from ninja import ModelSchema, Schema
 from ninja.errors import ValidationError
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 from controle_estoque.core import models
 
@@ -34,8 +35,8 @@ class MunicipioSchema(ModelSchema):
 
 
 class ArmazemSchema(ModelSchema):
-    empresa: EmpresaSchema
-    municipio: MunicipioSchema | None
+    empresa: str
+    municipio: str | None
     cep: str | None
 
     @field_validator('cep')
@@ -57,11 +58,12 @@ class ArmazemSchema(ModelSchema):
 
 class ArmazemNovoSchema(ModelSchema):
     empresa_id: uuid.UUID
+    municipio_id: int
 
     class Meta:
         model = models.Armazem
         fields = [
-            'nome', 'logradouro', 'numero', 'complemento', 'municipio', 'cep'
+            'nome', 'logradouro', 'numero', 'complemento', 'cep'
         ]
 
 
@@ -84,8 +86,23 @@ class UnidadeMedidaSchema(ModelSchema):
         fields = ['id', 'nome', 'sigla']
 
 
+class MarcaSchema(ModelSchema):
+
+    class Meta:
+        model = models.Marca
+        fields = ['uuid', 'nome']
+
+
+class MarcaNovaSchema(ModelSchema):
+
+    class Meta:
+        model = models.Marca
+        fields = ['nome']
+
+
 class ProdutoSchema(ModelSchema):
     unidade_medida_sigla: str
+    marca: str | None = None
 
     class Meta:
         model = models.Produto
@@ -94,6 +111,7 @@ class ProdutoSchema(ModelSchema):
     
 class ProdutoNovoSchema(ModelSchema):
     unidade_medida_id: int
+    marca_id: uuid.UUID | None = None
 
     class Meta:
         model = models.Produto
@@ -103,6 +121,7 @@ class ProdutoNovoSchema(ModelSchema):
 class ProdutoEditaSchema(Schema):
     nome: str | None = None
     unidade_medida_id: int | None = None
+    marca_id: uuid.UUID | None = None
     
     class Config:
         extra = 'forbid'
@@ -113,6 +132,8 @@ class EstoqueSchema(ModelSchema):
     armazem_nome: str
     produto_uuid: uuid.UUID
     produto_nome: str
+    produto_unidade_medida: str
+    produto_marca: str | None = None
 
     class Meta:
         model = models.Estoque
@@ -159,7 +180,18 @@ class MovimentoNovoSchema(ModelSchema):
         if v not in [models.Movimento.ENTRADA, models.Movimento.SAIDA]:
             raise ValidationError('Tipo não permitido, escolha E (Entrada) ou S (Saída)')
         return v
+    
+    @model_validator(mode='before')
+    @classmethod
+    def valida_preco_de_entrada(cls, data: Any) -> Any:
+        tipo = data._obj.get('tipo')
+        preco = data._obj.get('preco')
+
+        if tipo == 'E' and not preco:
+            raise ValidationError('É necessário informar o preço na entrada de estoque.')
+        
+        return data
 
     class Meta:
         model = models.Movimento
-        fields = ['quantidade']
+        fields = ['quantidade', 'preco']

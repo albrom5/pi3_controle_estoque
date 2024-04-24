@@ -1,6 +1,9 @@
 from datetime import datetime
 
+from django.db.models.deletion import ProtectedError
+from django.db.utils import IntegrityError
 from django.shortcuts import get_object_or_404
+from ninja.errors import HttpError
 from ninja_extra import NinjaExtraAPI
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.controller import NinjaJWTDefaultController
@@ -21,6 +24,25 @@ def unidade_medida_lista(request):
     return response
 
 
+@api.get('/marcas', auth=JWTAuth(), response=schemas.ListaSchema)
+def marca_lista(request):
+    marcas = models.Marca.objects.order_by('nome')
+    
+    lista_marcas = [schemas.MarcaSchema(**m) for m in marcas.values()] 
+    response = schemas.ListaSchema(quantidade=marcas.count(), lista=lista_marcas)
+    return response
+
+
+@api.post('/marca/nova', auth=JWTAuth(), response=schemas.MarcaSchema)
+def marca_nova(request, payload: schemas.MarcaNovaSchema):
+    marca = models.Marca(**payload.dict())
+    try:
+        marca.save()
+    except IntegrityError:
+        raise HttpError(400, 'Já existe uma marca cadastrada com o mesmo nome.')
+    return marca
+
+
 @api.get('/municipios', auth=JWTAuth(), response=schemas.ListaSchema)
 def municipios_lista(request):
     municipios = models.Municipio.objects.order_by('uf', 'nome')
@@ -36,14 +58,34 @@ def armazem_novo(request, payload: schemas.ArmazemNovoSchema):
 
     armazem = models.Armazem(**payload.dict())
     armazem.save()
-    return armazem
+    response = schemas.ArmazemSchema(
+        uuid=armazem.uuid,
+        nome=armazem.nome,
+        logradouro=armazem.logradouro,
+        numero=armazem.numero,
+        complemento=armazem.complemento,
+        cep=armazem.cep,
+        empresa=armazem.empresa.nome,
+        municipio=f'{armazem.municipio.nome}/{armazem.municipio.uf}' if armazem.municipio is not None else ''
+    )
+    return response
 
 
 @api.get('/armazem/{armazem_id}', auth=JWTAuth(), response=schemas.ArmazemSchema)
 def armazem(request, armazem_id: str):
     armazem = get_object_or_404(models.Armazem, uuid=armazem_id)
     valida_permissao_empresa(request.user, armazem.empresa)
-    return armazem
+    response = schemas.ArmazemSchema(
+        uuid=armazem.uuid,
+        nome=armazem.nome,
+        logradouro=armazem.logradouro,
+        numero=armazem.numero,
+        complemento=armazem.complemento,
+        cep=armazem.cep,
+        empresa=armazem.empresa.nome,
+        municipio=f'{armazem.municipio.nome}/{armazem.municipio.uf}' if armazem.municipio is not None else ''
+    )
+    return response
 
 
 @api.patch('/armazem/{armazem_id}', auth=JWTAuth(), response=schemas.ArmazemSchema)
@@ -53,7 +95,17 @@ def armazem_edita(request, armazem_id: str, payload: schemas.ArmazemEditaSchema)
     for attr, value in payload.dict(exclude_unset=True).items():
         setattr(armazem, attr, value)
     armazem.save()
-    return armazem
+    response = schemas.ArmazemSchema(
+        uuid=armazem.uuid,
+        nome=armazem.nome,
+        logradouro=armazem.logradouro,
+        numero=armazem.numero,
+        complemento=armazem.complemento,
+        cep=armazem.cep,
+        empresa=armazem.empresa.nome,
+        municipio=f'{armazem.municipio.nome}/{armazem.municipio.uf}' if armazem.municipio is not None else ''
+    )
+    return response
 
 
 @api.delete('/armazem/{armazem_id}', auth=JWTAuth())
@@ -81,21 +133,13 @@ def armazem_lista(request, empresa_id: str | None = None):
     lista_armazens = [
         schemas.ArmazemSchema(
             uuid=a.uuid,
-            empresa=schemas.EmpresaSchema(
-                uuid=a.empresa.uuid, 
-                nome=a.empresa.nome, 
-                cnpj=a.empresa.cnpj
-            ),            
+            empresa=a.empresa.nome, 
             nome=a.nome,
             logradouro=a.logradouro,
             numero=a.numero,
             complemento=a.complemento,
             cep=a.cep,
-            municipio=schemas.MunicipioSchema(
-                id=a.municipio.id,
-                nome=a.municipio.nome,
-                uf=a.municipio.uf
-            ) if a.municipio is not None else None
+            municipio=f'{a.municipio.nome}/{a.municipio.uf}' if a.municipio is not None else ''
         ) 
         for a in armazens
     ]
@@ -106,14 +150,30 @@ def armazem_lista(request, empresa_id: str | None = None):
 @api.post('/produto/novo', auth=JWTAuth(), response=schemas.ProdutoSchema)
 def produto_novo(request, payload: schemas.ProdutoNovoSchema):
     produto = models.Produto(**payload.dict())
-    produto.save()
-    return produto
+    try:
+        produto.save()
+    except IntegrityError:
+        raise HttpError(400, 'Já existe um produto cadastrado com o mesmo nome, unidade de medida e marca.')
+    
+    response = schemas.ProdutoSchema(
+        uuid=produto.uuid,
+        nome=produto.nome,
+        unidade_medida_sigla=produto.unidade_medida.sigla,
+        marca=produto.marca.nome if produto.marca is not None else ''
+    )
+    return response
 
 
 @api.get('/produto/{produto_id}', auth=JWTAuth(), response=schemas.ProdutoSchema)
 def produto(request, produto_id: str):
     produto = get_object_or_404(models.Produto, uuid=produto_id)
-    return produto
+    response = schemas.ProdutoSchema(
+        uuid=produto.uuid,
+        nome=produto.nome,
+        unidade_medida_sigla=produto.unidade_medida.sigla,
+        marca=produto.marca.nome if produto.marca is not None else ''
+    )
+    return response
 
 
 @api.patch('/produto/{produto_id}', auth=JWTAuth(), response=schemas.ProdutoSchema)
@@ -122,7 +182,13 @@ def produto_edita(request, produto_id: str, payload: schemas.ProdutoEditaSchema)
     for attr, value in payload.dict(exclude_unset=True).items():
         setattr(produto, attr, value)
     produto.save()
-    return produto
+    response = schemas.ProdutoSchema(
+        uuid=produto.uuid,
+        nome=produto.nome,
+        unidade_medida_sigla=produto.unidade_medida.sigla,
+        marca=produto.marca.nome if produto.marca is not None else ''
+    )
+    return response
 
 
 @api.delete('/produto/{produto_id}', auth=JWTAuth())
@@ -143,7 +209,8 @@ def produto_lista(request):
         schemas.ProdutoSchema(
             uuid=p.uuid,
             nome=p.nome,
-            unidade_medida_sigla=p.unidade_medida.sigla
+            unidade_medida_sigla=p.unidade_medida.sigla, 
+            marca=p.marca.nome if p.marca is not None else ''
         ) 
         for p in produtos
     ] 
@@ -164,6 +231,8 @@ def estoque_novo(request, payload: schemas.EstoqueNovoSchema):
         armazem_nome=estoque.armazem.nome,
         produto_uuid=estoque.produto.uuid,
         produto_nome=estoque.produto.nome,
+        produto_unidade_medida=estoque.produto.unidade_medida.sigla,
+        produto_marca=estoque.produto.marca.nome if estoque.produto.marca is not None else '',
         quantidade=estoque.quantidade,
         preco=estoque.preco
     )
@@ -180,6 +249,8 @@ def estoque(request, estoque_id: str):
         armazem_nome=estoque.armazem.nome,
         produto_uuid=estoque.produto.uuid,
         produto_nome=estoque.produto.nome,
+        produto_unidade_medida=estoque.produto.unidade_medida.sigla,
+        produto_marca=estoque.produto.marca.nome if estoque.produto.marca is not None else '',
         quantidade=estoque.quantidade,
         preco=estoque.preco
     )
@@ -199,6 +270,8 @@ def estoque_edita(request, estoque_id: str, payload: schemas.EstoqueEditaSchema)
         armazem_nome=estoque.armazem.nome,
         produto_uuid=estoque.produto.uuid,
         produto_nome=estoque.produto.nome,
+        produto_unidade_medida=estoque.produto.unidade_medida.sigla,
+        produto_marca=estoque.produto.marca.nome if estoque.produto.marca is not None else '',
         quantidade=estoque.quantidade,
         preco=estoque.preco
     )
@@ -210,14 +283,18 @@ def estoque_exclui(request, estoque_id: str):
     estoque = get_object_or_404(models.Estoque, uuid=estoque_id)
     valida_permissao_empresa(request.user, estoque.armazem.empresa)
     uuid_str = estoque.uuid
-    estoque.delete()
+    try:
+        estoque.delete()
+    except ProtectedError:
+        raise HttpError(400, 'Não é possível excluir o item pois há movimentação registrada.')
     return {'successo': f'O item de estoque {estoque.produto.nome} - {uuid_str} foi excluído.'}
 
 
 @api.get('/itens_estoque', auth=JWTAuth(), response=schemas.ListaSchema)
 def estoque_lista(request, empresa_id: str | None = None):
     estoques = models.Estoque.objects.select_related(
-        'armazem', 'armazem__empresa', 'produto'
+        'armazem', 'armazem__empresa', 'produto', 
+        'produto__unidade_medida', 'produto__marca'
     ).order_by('produto__nome')
     if empresa_id is not None:
         empresa = models.Empresa.objects.filter(uuid=empresa_id).first()
@@ -236,6 +313,8 @@ def estoque_lista(request, empresa_id: str | None = None):
             armazem_nome=e.armazem.nome,
             produto_uuid=e.produto.uuid,
             produto_nome=e.produto.nome,
+            produto_unidade_medida=e.produto.unidade_medida.sigla,
+            produto_marca=e.produto.marca.nome if e.produto.marca is not None else '',
             quantidade=e.quantidade,
             preco=e.preco
         ) 
@@ -303,6 +382,8 @@ def movimento_novo(request, payload: schemas.MovimentoNovoSchema):
         armazem_nome=movimento.estoque.armazem.nome,
         produto_uuid=movimento.estoque.produto.uuid,
         produto_nome=movimento.estoque.produto.nome,
+        produto_unidade_medida=estoque.produto.unidade_medida.sigla,
+        produto_marca=estoque.produto.marca.nome if estoque.produto.marca is not None else '',
         quantidade=movimento.estoque.quantidade,
         preco=movimento.estoque.preco
     )

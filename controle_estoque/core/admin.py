@@ -43,9 +43,14 @@ class UnidadeMedidaAdmin(admin.ModelAdmin):
     list_display = ['nome', 'sigla']
 
 
+@admin.register(models.Marca)
+class MarcaAdmin(admin.ModelAdmin):
+    list_display = ['nome']
+
+
 @admin.register(models.Produto)
 class ProdutoAdmin(admin.ModelAdmin):
-    list_display = ['nome', 'unidade_medida']
+    list_display = ['nome', 'unidade_medida', 'marca']
 
 
 class EstoqueInLine(admin.TabularInline):
@@ -64,6 +69,7 @@ class MovimentoInLine(admin.TabularInline):
     model = models.Movimento
     extra = 0
     ordering = ['-criado_em']
+
 
 @admin.register(models.Estoque)
 class EstoqueAdmin(admin.ModelAdmin):
