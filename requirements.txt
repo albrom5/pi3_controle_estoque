@@ -9,6 +9,7 @@ annotated-types==0.6.0
 asgiref==3.8.1
     # via
     #   django
+    #   django-cors-headers
     #   django-ninja-extra
 build==1.2.1
     # via pip-tools
@@ -26,9 +27,12 @@ django==5.0.3
     # via
     #   -r requirements.in
     #   dj-database-url
+    #   django-cors-headers
     #   django-ninja
     #   django-ninja-extra
     #   django-ninja-jwt
+django-cors-headers==4.3.1
+    # via -r requirements.in
 django-ninja==1.1.0
     # via
     #   -r requirements.in

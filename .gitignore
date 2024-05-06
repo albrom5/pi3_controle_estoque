@@ -2,4 +2,4 @@
 *.pyc
 *.vscode
 *.http
-.env
+*.env
