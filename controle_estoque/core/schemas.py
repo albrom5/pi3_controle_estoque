@@ -102,6 +102,8 @@ class MarcaNovaSchema(ModelSchema):
 
 class ProdutoSchema(ModelSchema):
     unidade_medida_sigla: str
+    unidade_medida_id: int
+    marca_id: uuid.UUID | None = None
     marca: str | None = None
 
     class Meta:

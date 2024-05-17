@@ -171,7 +171,9 @@ def produto(request, produto_id: str):
         uuid=produto.uuid,
         nome=produto.nome,
         unidade_medida_sigla=produto.unidade_medida.sigla,
-        marca=produto.marca.nome if produto.marca is not None else ''
+        unidade_medida_id=produto.unidade_medida.id, 
+        marca=produto.marca.nome if produto.marca is not None else '',
+        marca_id=produto.marca.uuid if produto.marca is not None else None
     )
     return response
 
@@ -186,7 +188,9 @@ def produto_edita(request, produto_id: str, payload: schemas.ProdutoEditaSchema)
         uuid=produto.uuid,
         nome=produto.nome,
         unidade_medida_sigla=produto.unidade_medida.sigla,
-        marca=produto.marca.nome if produto.marca is not None else ''
+        unidade_medida_id=produto.unidade_medida.id, 
+        marca=produto.marca.nome if produto.marca is not None else '',
+        marca_id=produto.marca.uuid if produto.marca is not None else None
     )
     return response
 
@@ -210,7 +214,9 @@ def produto_lista(request):
             uuid=p.uuid,
             nome=p.nome,
             unidade_medida_sigla=p.unidade_medida.sigla, 
-            marca=p.marca.nome if p.marca is not None else ''
+            unidade_medida_id=p.unidade_medida.id, 
+            marca=p.marca.nome if p.marca is not None else '',
+            marca_id=p.marca.uuid if p.marca is not None else None
         ) 
         for p in produtos
     ] 
