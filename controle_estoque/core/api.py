@@ -3,7 +3,7 @@ from datetime import datetime
 from django.db.models.deletion import ProtectedError
 from django.db.utils import IntegrityError
 from django.shortcuts import get_object_or_404
-from ninja.errors import HttpError
+from ninja.errors import AuthenticationError, HttpError
 from ninja_extra import NinjaExtraAPI
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.controller import NinjaJWTDefaultController
@@ -43,6 +43,41 @@ def marca_nova(request, payload: schemas.MarcaNovaSchema):
     return marca
 
 
+@api.get('/marca/{marca_id}', auth=JWTAuth(), response=schemas.MarcaSchema)
+def marca(request, marca_id: str):
+    marca = get_object_or_404(models.Marca, uuid=marca_id)
+    
+    response = schemas.MarcaSchema(
+        uuid=marca.uuid,
+        nome=marca.nome,
+    )
+    return response
+
+
+@api.patch('/marca/{marca_id}', auth=JWTAuth(), response=schemas.MarcaSchema)
+def marca_edita(request, marca_id: str, payload: schemas.MarcaNovaSchema):
+    marca = get_object_or_404(models.Marca, uuid=marca_id)
+    
+    for attr, value in payload.dict(exclude_unset=True).items():
+        setattr(marca, attr, value)
+    marca.save()
+
+    response = schemas.MarcaSchema(
+        uuid=marca.uuid,
+        nome=marca.nome,
+    )
+    return response
+
+
+@api.delete('/marca/{marca_id}', auth=JWTAuth())
+def marca_exclui(request, marca_id: str):
+    marca = get_object_or_404(models.Marca, uuid=marca_id)
+    
+    uuid_str = marca.uuid
+    marca.delete()
+    return {'successo': f'A marca {marca.nome} - {uuid_str} foi excluída.'}
+
+
 @api.get('/municipios', auth=JWTAuth(), response=schemas.ListaSchema)
 def municipios_lista(request):
     municipios = models.Municipio.objects.order_by('uf', 'nome')
@@ -53,10 +88,14 @@ def municipios_lista(request):
 
 @api.post('/armazem/novo', auth=JWTAuth(), response=schemas.ArmazemSchema)
 def armazem_novo(request, payload: schemas.ArmazemNovoSchema):
-    empresa = models.Empresa.objects.filter(uuid=payload.empresa_id).first()
-    valida_permissao_empresa(request.user, empresa)
-
+    perfil = request.user.perfil_set.all().first()
+    if perfil is None:
+        raise AuthenticationError()
+    
+    empresa = perfil.empresa
+    
     armazem = models.Armazem(**payload.dict())
+    armazem.empresa = empresa
     armazem.save()
     response = schemas.ArmazemSchema(
         uuid=armazem.uuid,
@@ -83,7 +122,8 @@ def armazem(request, armazem_id: str):
         complemento=armazem.complemento,
         cep=armazem.cep,
         empresa=armazem.empresa.nome,
-        municipio=f'{armazem.municipio.nome}/{armazem.municipio.uf}' if armazem.municipio is not None else ''
+        municipio=f'{armazem.municipio.nome}/{armazem.municipio.uf}' if armazem.municipio is not None else '',
+        municipio_id=armazem.municipio.id if armazem.municipio is not None else None
     )
     return response
 
@@ -122,6 +162,7 @@ def armazem_lista(request, empresa_id: str | None = None):
     armazens = models.Armazem.objects.select_related(
         'empresa', 'municipio'
     ).order_by('nome')
+
     if empresa_id is not None:
         empresa = models.Empresa.objects.filter(uuid=empresa_id).first()
         valida_permissao_empresa(request.user, empresa)
@@ -251,6 +292,14 @@ def estoque_novo(request, payload: schemas.EstoqueNovoSchema):
 def estoque(request, estoque_id: str):
     estoque = get_object_or_404(models.Estoque, uuid=estoque_id)
     valida_permissao_empresa(request.user, estoque.armazem.empresa)
+    movimentos = [
+        {
+            'tipo': m.tipo,
+            'quantidade': m.quantidade,
+            'preco': m.preco,
+            'data': m.criado_em
+        } for m in estoque.movimentos.all()
+    ]
     response = schemas.EstoqueSchema(
         uuid=estoque.uuid,
         armazem_uuid=estoque.armazem.uuid,
@@ -260,7 +309,8 @@ def estoque(request, estoque_id: str):
         produto_unidade_medida=estoque.produto.unidade_medida.sigla,
         produto_marca=estoque.produto.marca.nome if estoque.produto.marca is not None else '',
         quantidade=estoque.quantidade,
-        preco=estoque.preco
+        preco=estoque.preco,
+        movimentos=movimentos
     )
     return response
 
@@ -394,5 +444,21 @@ def movimento_novo(request, payload: schemas.MovimentoNovoSchema):
         produto_marca=estoque.produto.marca.nome if estoque.produto.marca is not None else '',
         quantidade=movimento.estoque.quantidade,
         preco=movimento.estoque.preco
+    )
+    return response
+
+
+@api.get('/usuario', auth=JWTAuth(), response=schemas.PerfilSchema)
+def usuario(request):
+    perfil = request.user.perfil_set.all().first()
+    response = schemas.PerfilSchema(
+        id=request.user.id,
+        usuario=request.user.username,
+        nome=request.user.get_full_name(),
+        empresa_uuid=perfil.empresa.uuid if perfil else None,
+        empresa_nome=perfil.empresa.nome if perfil else '',
+        empresa_cnpj=perfil.empresa.cnpj if perfil else '',
+        tipo=perfil.tipo.nome if perfil else '',
+        logado=True
     )
     return response

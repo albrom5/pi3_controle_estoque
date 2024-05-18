@@ -37,17 +37,18 @@ class MunicipioSchema(ModelSchema):
 class ArmazemSchema(ModelSchema):
     empresa: str
     municipio: str | None
+    municipio_id: int | None = None
     cep: str | None
 
-    @field_validator('cep')
-    @classmethod
-    def cep_formatado(cls, v: str) -> str:
-        cep_formatado = re.sub(
-            r'(\d{5})(\d{3})', 
-            r'\1-\2', 
-            v
-        )
-        return cep_formatado
+    # @field_validator('cep')
+    # @classmethod
+    # def cep_formatado(cls, v: str) -> str:
+    #     cep_formatado = re.sub(
+    #         r'(\d{5})(\d{3})', 
+    #         r'\1-\2', 
+    #         v
+    #     )
+    #     return cep_formatado
     
     class Meta:
         model = models.Armazem
@@ -57,7 +58,7 @@ class ArmazemSchema(ModelSchema):
 
 
 class ArmazemNovoSchema(ModelSchema):
-    empresa_id: uuid.UUID
+    empresa_id: uuid.UUID | None = None
     municipio_id: int
 
     class Meta:
@@ -68,11 +69,12 @@ class ArmazemNovoSchema(ModelSchema):
 
 
 class ArmazemEditaSchema(ModelSchema):
+    municipio_id: int | None = None
     
     class Meta:
         model = models.Armazem
         fields = [
-            'nome', 'logradouro', 'numero', 'complemento', 'municipio', 'cep'
+            'nome', 'logradouro', 'numero', 'complemento', 'cep'
         ]
 
     class Config:
@@ -136,6 +138,7 @@ class EstoqueSchema(ModelSchema):
     produto_nome: str
     produto_unidade_medida: str
     produto_marca: str | None = None
+    movimentos: list | None = None
 
     class Meta:
         model = models.Estoque
@@ -164,12 +167,14 @@ class ListaSchema(Schema):
 
 
 class PerfilSchema(Schema):
+    id: int
     usuario: str
     nome: str
-    empresa_uuid: uuid.UUID
+    empresa_uuid: uuid.UUID | None
     empresa_nome: str
     empresa_cnpj: str
     tipo: str
+    logado: bool
 
 
 class MovimentoNovoSchema(ModelSchema):
