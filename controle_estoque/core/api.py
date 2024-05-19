@@ -60,7 +60,10 @@ def marca_edita(request, marca_id: str, payload: schemas.MarcaNovaSchema):
     
     for attr, value in payload.dict(exclude_unset=True).items():
         setattr(marca, attr, value)
-    marca.save()
+    try:
+        marca.save()
+    except IntegrityError:
+        raise HttpError(400, 'Já existe uma marca cadastrada com o mesmo nome.')
 
     response = schemas.MarcaSchema(
         uuid=marca.uuid,
@@ -74,7 +77,10 @@ def marca_exclui(request, marca_id: str):
     marca = get_object_or_404(models.Marca, uuid=marca_id)
     
     uuid_str = marca.uuid
-    marca.delete()
+    try:
+        marca.delete()
+    except ProtectedError:
+        raise HttpError(400, 'Não é possível excluir marca associada a produto cadastrado.')
     return {'successo': f'A marca {marca.nome} - {uuid_str} foi excluída.'}
 
 
@@ -153,7 +159,10 @@ def armazem_exclui(request, armazem_id: str):
     armazem = get_object_or_404(models.Armazem, uuid=armazem_id)
     valida_permissao_empresa(request.user, armazem.empresa)
     uuid_str = armazem.uuid
-    armazem.delete()
+    try:
+        armazem.delete()
+    except ProtectedError:
+        raise HttpError(400, 'Não é possível excluir local de armazenagem com itens estocados.')
     return {'successo': f'O armazém {armazem.nome} - {uuid_str} foi excluído.'}
 
 
@@ -226,7 +235,11 @@ def produto_edita(request, produto_id: str, payload: schemas.ProdutoEditaSchema)
     produto = get_object_or_404(models.Produto, uuid=produto_id)
     for attr, value in payload.dict(exclude_unset=True).items():
         setattr(produto, attr, value)
-    produto.save()
+    try:
+        produto.save()
+    except IntegrityError:
+        raise HttpError(400, 'Já existe um produto cadastrado com o mesmo nome, unidade de medida e marca.')
+    
     response = schemas.ProdutoSchema(
         uuid=produto.uuid,
         nome=produto.nome,
@@ -242,7 +255,10 @@ def produto_edita(request, produto_id: str, payload: schemas.ProdutoEditaSchema)
 def produto_exclui(request, produto_id: str):
     produto = get_object_or_404(models.Produto, uuid=produto_id)
     uuid_str = produto.uuid
-    produto.delete()
+    try:
+        produto.delete()
+    except ProtectedError:
+        raise HttpError(400, 'Não é possível excluir produto cadastrado em estoque.')
     return {'successo': f'O produto {produto.nome} - {uuid_str} foi excluído.'}
 
 
@@ -298,7 +314,7 @@ def estoque(request, estoque_id: str):
             'quantidade': m.quantidade,
             'preco': m.preco,
             'data': m.criado_em
-        } for m in estoque.movimentos.all()
+        } for m in estoque.movimentos.order_by('-criado_em')
     ]
     response = schemas.EstoqueSchema(
         uuid=estoque.uuid,
@@ -349,7 +365,9 @@ def estoque_exclui(request, estoque_id: str):
 
 
 @api.get('/itens_estoque', auth=JWTAuth(), response=schemas.ListaSchema)
-def estoque_lista(request, empresa_id: str | None = None):
+def estoque_lista(
+    request, empresa_id: str | None = None, armazem_id: str | None = None, produto_id: str | None = None
+):
     estoques = models.Estoque.objects.select_related(
         'armazem', 'armazem__empresa', 'produto', 
         'produto__unidade_medida', 'produto__marca'
@@ -363,7 +381,19 @@ def estoque_lista(request, empresa_id: str | None = None):
         estoques = estoques.filter(
             armazem__empresa__perfil__usuario=request.user
         ).distinct()
-    
+
+    if armazem_id is not None:
+        armazem = models.Armazem.objects.filter(
+            uuid=armazem_id
+        ).first()
+        estoques = estoques.filter(armazem=armazem)
+
+    if produto_id is not None:
+        produto = models.Produto.objects.filter(
+            uuid=produto_id
+        ).first()
+        estoques = estoques.filter(produto=produto)
+
     lista_estoques = [
         schemas.EstoqueSchema(
             uuid=e.uuid,
@@ -423,16 +453,22 @@ def perfil_lista(request, empresa_id: str | None = None):
     return response
 
 
-@api.post('/movimento/novo', auth=JWTAuth(), response=schemas.EstoqueSchema)
-def movimento_novo(request, payload: schemas.MovimentoNovoSchema):
-    estoque = models.Estoque.objects.filter(uuid=payload.estoque_id).first()
+@api.post('{estoque_id}/movimento/novo', auth=JWTAuth(), response=schemas.EstoqueSchema)
+def movimento_novo(request, estoque_id, payload: schemas.MovimentoNovoSchema):
+    estoque = get_object_or_404(models.Estoque, pk=estoque_id)
     valida_permissao_empresa(request.user, estoque.armazem.empresa)
 
     movimento = models.Movimento(**payload.dict())
+    if movimento.tipo == models.Movimento.SAIDA and movimento.quantidade > estoque.quantidade:
+        raise HttpError(400, 'A quantidade da saída é superior ao estocado.')
+    if movimento.quantidade == 0:
+        raise HttpError(400, 'A quantidade movimentada deve ser maior que zero.')
+    movimento.estoque = estoque
     movimento.responsavel = request.user.perfil_set.filter(
         empresa=estoque.armazem.empresa
     ).first()
     movimento.criado_em = datetime.now()
+
     movimento.save()
     response = schemas.EstoqueSchema(
         uuid=estoque.uuid,

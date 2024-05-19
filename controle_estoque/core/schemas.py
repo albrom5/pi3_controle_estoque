@@ -178,7 +178,6 @@ class PerfilSchema(Schema):
 
 
 class MovimentoNovoSchema(ModelSchema):
-    estoque_id: uuid.UUID
     tipo: str 
 
     @field_validator('tipo', mode='before')
